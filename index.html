@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CampusConnect</title>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#16242b;--muted:#53636b;--bg:#eef1f3;--card:#fff;--line:#cfd7dc;--brand:#0f4c4a;--btn:#fff;--amber:#b9770e;--amberbg:#fff6e0}
+@media(prefers-color-scheme:dark){:root{--ink:#e8eef0;--muted:#a3b1b8;--bg:#10181c;--card:#18242a;--line:#2f414a;--brand:#5fc2bb;--btn:#0b1417;--amber:#f0b955;--amberbg:#2a2312}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Atkinson Hyperlegible",system-ui,sans-serif}
+header{background:#0f4c4a;color:#fff;padding:14px 20px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between}
+header h1{margin:0;font-size:1.3rem}header small{opacity:.85}header select{width:auto;padding:4px}
+main{max-width:760px;margin:0 auto;padding:20px}
+nav{display:flex;margin-bottom:16px}nav button{background:none;border:0;border-bottom:3px solid transparent;color:var(--muted);font:inherit;font-weight:700;padding:8px 4px;margin-right:16px;cursor:pointer}
+nav button[aria-current=true]{color:var(--ink);border-color:var(--brand)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:700;margin:12px 0 4px}textarea,select,input{width:100%;font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:9px}
+textarea{min-height:120px}button.p,button.s{font:inherit;font-weight:700;border-radius:6px;padding:9px 16px;cursor:pointer;margin:12px 8px 0 0}
+button.p{background:var(--brand);color:var(--btn);border:0}button.s{background:none;border:1px solid var(--brand);color:var(--brand)}button:disabled{opacity:.5}
+:focus-visible{outline:3px solid var(--amber);outline-offset:2px}
+.sug{border:2px dashed var(--amber);background:var(--amberbg);border-radius:8px;padding:16px;margin-top:16px}
+.sug h3{margin:0 0 4px}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}@media(max-width:560px){.row{grid-template-columns:1fr}}
+.notice{font-size:.9rem;color:var(--muted);border-left:4px solid var(--amber);padding:2px 10px;margin:10px 0}
+.pill{display:inline-block;padding:1px 10px;border-radius:99px;border:1px solid var(--line);font-size:.85rem;font-weight:700}
+.err{color:#b3261e;font-weight:700}.ok{color:var(--brand);font-weight:700}.alert{background:#fde8e6;color:#7a1a13;padding:10px;border-radius:6px;margin-top:10px}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top;font-size:.93rem}
+.demo{background:var(--amberbg);color:var(--amber);border:1px dashed var(--amber);padding:0 6px;border-radius:4px;font-size:.75rem;font-weight:700}
+</style></head><body>
+<header><div><h1>CampusConnect</h1><small>Tell us what’s wrong. We’ll route it to the right team.</small></div><div id="who"></div></header>
+<main>
+<div id="banner"></div>
+<nav id="tabs"><button data-v="submit" aria-current="true">New complaint</button><button data-v="track">Track</button><button data-v="staff" id="staffTab" hidden>Staff review</button></nav>
+
+<section id="submit" class="card">
+ <label for="desc">What happened?</label>
+ <textarea id="desc" maxlength="2000" placeholder="Example: The heating in the library has been off for three days and it is too cold to study."></textarea>
+ <div class="notice">Don’t include passwords, health details or other people’s personal data. Your text is sent to an AI model only when you press “Get AI suggestions”.</div>
+ <button class="s" id="askAI">Get AI suggestions</button><button class="s" id="skip" type="button">Choose myself</button>
+ <div id="sug" class="sug" hidden>
+  <h3>Suggestions — please check them</h3>
+  <p class="notice" id="aiNote"></p>
+  <div class="row"><div><label for="cat">Category</label><select id="cat"></select></div>
+  <div><label for="urg">Urgency</label><select id="urg"></select></div></div>
+  <label for="sum">Short summary (editable)</label><textarea id="sum" style="min-height:70px"></textarea>
+  <p id="why"></p><div id="alert"></div>
+ </div>
+ <button class="p" id="send" disabled>Submit complaint</button>
+ <p id="msg" role="status"></p>
+</section>
+
+<section id="track" class="card" hidden>
+ <label for="ref">Reference number</label><input id="ref" placeholder="CC-XXXXXX">
+ <button class="p" id="find">Check status</button><div id="found"></div>
+</section>
+
+<section id="staff" class="card" hidden><h2 style="margin-top:0">All complaints</h2><div id="list" style="overflow-x:auto"></div></section>
+
+<p class="notice"><b>AI-use notice:</b> category, summary and urgency suggestions may come from an AI model and can be wrong. You decide what to submit. AI never changes a complaint’s status or takes action; only staff do.</p>
+</main>
+<script>
+const CATS=["Academics","Facilities","IT","Administration","Safety","Other"],URG=["Low","Medium","High"],STAT=["Submitted","In review","Resolved","Closed"];
+const local=location.hostname==="localhost"&&location.port!=="4280";
+const API=local?"http://localhost:7071/api":"/api";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+let me=null,role="student",ai=null;
+async function api(p,o={}){
+  const h={"Content-Type":"application/json"};
+  if(local){h["X-Demo-Role"]=role;h["X-Demo-User"]=role==="staff"?"demo-staff":"demo-student"}
+  const r=await fetch(API+p,{...o,headers:h});let j={};try{j=await r.json()}catch{}
+  if(r.status===401&&!local){location.href="/login";return}
+  if(!r.ok)throw new Error(j.error||"Something went wrong ("+r.status+")");return j}
+const fill=(el,a)=>el.innerHTML=a.map(x=>`<option>${x}</option>`).join("");
+fill($("cat"),CATS);fill($("urg"),URG);
+async function init(){
+  try{me=await api("/me")}catch(e){$("banner").innerHTML=`<p class="err">Can’t reach the API. Is <code>func start</code> running? ${esc(e.message)}</p>`;return}
+  $("who").innerHTML=local?`<span class="demo">LOCAL DEMO</span> <select id="roleSel" aria-label="Demo role"><option value="student">Student</option><option value="staff">Staff</option></select>`
+    :`${esc(me.name)} · <a style="color:#fff" href="/logout">Sign out</a>`;
+  if(local){$("roleSel").value=role;$("roleSel").onchange=e=>{role=e.target.value;init();show("submit")}}
+  $("staffTab").hidden=!me.staff}
+function show(v){for(const s of["submit","track","staff"])$(s).hidden=s!==v;
+  document.querySelectorAll("nav button").forEach(b=>b.setAttribute("aria-current",b.dataset.v===v));if(v==="staff")loadList()}
+$("tabs").onclick=e=>e.target.dataset.v&&show(e.target.dataset.v);
+const alertCheck=()=>$("alert").innerHTML=($("cat").value==="Safety"||$("urg").value==="High")?
+  '<div class="alert">If anyone is in immediate danger, contact campus security or emergency services now. Do not wait for a reply here.</div>':"";
+$("cat").onchange=$("urg").onchange=alertCheck;
+$("askAI").onclick=async()=>{
+  const d=$("desc").value.trim();$("msg").textContent="";
+  if(d.length<20){$("msg").innerHTML='<span class="err">Please write at least 20 characters.</span>';return}
+  $("askAI").disabled=true;$("askAI").textContent="Analysing…";
+  try{const s=await api("/suggest",{method:"POST",body:JSON.stringify({description:d})});
+    ai=s;$("cat").value=s.category;$("urg").value=s.urgency;$("sum").value=s.summary;
+    $("aiNote").textContent="Source: "+s.source+(s.is_ai?". AI can make mistakes.":". This is a stand-in, not an AI model.");
+    $("why").innerHTML="<b>Why:</b> "+esc(s.explanation);alertCheck();$("sug").hidden=false;$("send").disabled=false;
+  }catch(e){$("msg").innerHTML=`<span class="err">${esc(e.message)}</span>`}
+  $("askAI").disabled=false;$("askAI").textContent="Get AI suggestions"};
+$("skip").onclick=()=>{ai=null;$("sug").hidden=false;$("aiNote").textContent="No AI used. You are choosing these yourself.";$("why").textContent="";alertCheck();$("send").disabled=false};
+$("send").onclick=async()=>{
+  try{const r=await api("/complaints",{method:"POST",body:JSON.stringify({description:$("desc").value,category:$("cat").value,urgency:$("urg").value,
+    summary:$("sum").value,ai:{used:!!ai&&ai.is_ai,category:ai&&ai.category,urgency:ai&&ai.urgency}})});
+    $("msg").innerHTML=`<span class="ok">Submitted. Your reference number is <b>${esc(r.ref)}</b>. Save it to track progress.</span>`;
+    $("desc").value="";$("sug").hidden=true;$("send").disabled=true;ai=null;
+  }catch(e){$("msg").innerHTML=`<span class="err">${esc(e.message)}</span>`}};
+$("find").onclick=async()=>{
+  try{const d=await api("/complaints/"+encodeURIComponent($("ref").value.trim()));
+    $("found").innerHTML=`<p><b>${esc(d.ref)}</b> <span class="pill">${esc(d.status)}</span></p><p>${esc(d.category)} · ${esc(d.urgency)} urgency<br>${esc(d.summary||d.description)}</p>`+
+     (d.notes.length?"<h3>Updates from staff</h3>"+d.notes.map(n=>`<p>${esc(n.text)}<br><small>${esc(n.by)}, ${esc(n.at.slice(0,10))}</small></p>`).join(""):"<p>No staff updates yet.</p>")
+  }catch(e){$("found").innerHTML=`<p class="err">${esc(e.message)}</p>`}};
+async function loadList(){
+  try{const L=await api("/complaints");
+    $("list").innerHTML="<table><tr><th>Ref</th><th>Issue</th><th>Status</th><th>Update</th></tr>"+L.map(d=>`<tr><td>${esc(d.ref)}${d.demo?' <span class="demo">DEMO</span>':""}</td>
+    <td><b>${esc(d.category)}</b> · ${esc(d.urgency)}${d.ai_assisted?" · AI-assisted":""}<br>${esc(d.summary||d.description)}</td>
+    <td><select data-r="${esc(d.ref)}">${STAT.map(s=>`<option${s===d.status?" selected":""}>${s}</option>`).join("")}</select></td>
+    <td><input data-n="${esc(d.ref)}" placeholder="Add update" aria-label="Note for ${esc(d.ref)}"><button class="s" data-save="${esc(d.ref)}">Save</button></td></tr>`).join("")+"</table>";
+  }catch(e){$("list").innerHTML=`<p class="err">${esc(e.message)}</p>`}}
+$("list").onclick=async e=>{const r=e.target.dataset.save;if(!r)return;
+  const status=document.querySelector(`[data-r="${r}"]`).value,note=document.querySelector(`[data-n="${r}"]`).value;
+  try{await api("/complaints/"+r,{method:"PATCH",body:JSON.stringify({status,note})});loadList()}catch(x){alert(x.message)}};
+init();
+</script></body></html>
